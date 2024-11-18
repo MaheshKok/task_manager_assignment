@@ -1,0 +1,87 @@
+services:
+  api: &main_app
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: task_manager:${TASK_MANAGER_VERSION:-latest}
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rmq:
+        condition: service_healthy
+    environment:
+      TASK_MANAGER_HOST: 0.0.0.0
+      TASK_MANAGER_DB_HOST: task_manager-db
+      TASK_MANAGER_DB_PORT: 5432
+      TASK_MANAGER_DB_USER: task_manager
+      TASK_MANAGER_DB_PASS: task_manager
+      TASK_MANAGER_DB_BASE: task_manager
+      TASK_MANAGER_RABBIT_HOST: task_manager-rmq
+      TASK_MANAGER_REDIS_HOST: task_manager-redis
+
+  db:
+    image: postgres:16.3-bullseye
+    hostname: task_manager-db
+    environment:
+      POSTGRES_PASSWORD: "task_manager"
+      POSTGRES_USER: "task_manager"
+      POSTGRES_DB: "task_manager"
+    volumes:
+      - task_manager-db-data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: pg_isready -U task_manager
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  migrator:
+    image: task_manager:${TASK_MANAGER_VERSION:-latest}
+    restart: "no"
+    command: alembic upgrade head
+    environment:
+      TASK_MANAGER_DB_HOST: task_manager-db
+      TASK_MANAGER_DB_PORT: 5432
+      TASK_MANAGER_DB_USER: task_manager
+      TASK_MANAGER_DB_PASS: task_manager
+      TASK_MANAGER_DB_BASE: task_manager
+    depends_on:
+      db:
+        condition: service_healthy
+
+  redis:
+    image: bitnami/redis:6.2.5
+    hostname: "task_manager-redis"
+    restart: always
+    environment:
+      ALLOW_EMPTY_PASSWORD: "yes"
+    healthcheck:
+      test: redis-cli ping
+      interval: 1s
+      timeout: 3s
+      retries: 50
+
+  rmq:
+    image: rabbitmq:3.9.16-alpine
+    hostname: "task_manager-rmq"
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
+      RABBITMQ_DEFAULT_VHOST: "/"
+    healthcheck:
+      test: rabbitmq-diagnostics check_running -q
+      interval: 3s
+      timeout: 3s
+      retries: 50
+
+
+
+volumes:
+  task_manager-db-data:
+    name: task_manager-db-data
